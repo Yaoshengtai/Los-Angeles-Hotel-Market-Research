@@ -1,0 +1,225 @@
+---
+title: "EDA 探索性数据分析"
+author:
+  - 姚圣泰
+documentclass: ctexart
+keywords:
+  - 中文
+  - R Markdown
+geometry: "left=2cm,right=2cm,top=2cm,bottom=2cm"
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: no
+    toc: no
+date: "2023-12-23"
+---
+
+```{r}
+library(ggplot2)
+library(tidyr)
+```
+
+```{r}
+#读取数据
+data <- read.csv("HOTELS.csv")
+```
+
+1、星级分布
+
+```{r}
+summary(modified_vector)
+```
+
+```{r}
+# 提取数字部分并转换为数值型
+data$star_rating <- as.numeric(sub(" stars out of 5", "", data$star))
+# 假设data$star_rating是一个包含星级评分的向量
+original_vector <- data$star_rating
+
+# 去除值为零的元素
+modified_vector <- original_vector[original_vector != 0]
+
+
+#modified_vector 创建直方图
+ggplot(data.frame(star_rating = modified_vector), aes(x = star_rating)) +
+  geom_histogram(binwidth = 0.5, fill = "Royalblue", color = "black", alpha = 0.7) +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.5) +
+  labs(title = "Distribution of Hotel Star Ratings (Excluding 0s)",
+       x = "Star Rating",
+       y = "Count") +
+  scale_x_continuous(breaks = seq(0, 5, by = 0.5)) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+2、价格分布
+
+```{r}
+summary(data$price)
+```
+
+密度图
+
+```{r}
+#除掉price为NA的
+data <- data[!is.na(data$price), ]
+# 创建密度图
+ggplot(data, aes(x = price)) +
+  geom_density(color="blue", linewidth=1)+
+  #添加标题
+  labs(title = "Distribution of price",
+       x = "price",
+       y = "density") +
+theme_minimal()+
+  #标题居中
+theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+柱状图
+
+```{r}
+#除掉price为NA的
+data <- data[!is.na(data$price), ]
+# 定义价格区间
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{bins <- c(0,50, 100,150,200,250,300, 400, 600, 800, 1000, Inf)}
+#切分
+data$price_range <- cut(data$price, bins, labels = c("0-50", "50-100","100-150","150-200","200-250","250-300","300-400", "400-600", "600-800", "800-1000", ">1000"), include.lowest = TRUE, right = FALSE)
+
+ggplot(data, aes(x = price_range)) +
+  geom_bar(fill = "Royalblue", color = "black", alpha = 0.7) +
+  #添加每个分类的数量
+  geom_text(aes(label = after_stat(count)), stat = "count", vjust = -0.5) + 
+  labs(title = "Price Distribution",
+       x = "Price Range",
+       y = "Count") +
+  theme_minimal() +
+  #旋转x轴标签
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  #标题居中
+theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+
+3、用户评价分布
+
+```{r}
+# 删除包含缺失值的行
+data_cleaned <- data[complete.cases(data$Score, data$Cleanliness, data$Facilities, data$Location, data$`Room.comfort.and.quality`, data$Service, data$`Value.for.money`), ]
+
+# 新建数据框用于ggplot
+
+data_score <- pivot_longer(data_cleaned, cols = c(Score, Cleanliness, Facilities, Location, `Room.comfort.and.quality`, Service, `Value.for.money`), names_to = "Variable", values_to = "Score")
+
+# 将 Variable 列转换为具有期望顺序的因子
+data_score$Variable <- factor(data_score$Variable, levels = unique(data_score$Variable))
+
+# 创建一个密度图，每个变量分别为一条曲线
+ggplot(data_score, aes(x = Score, group = Variable, color = Variable)) +
+  geom_density(linewidth = 1) +
+  labs(title = "Distribution Of User Evaluation",
+       x = "User Evaluation",
+       y = "Density") + 
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +  # 居中标题
+  theme(legend.position = "bottom",      
+        # 将图例移到图片下方
+        legend.box.background = element_rect(fill = "white", color = "white"),  # 去除黑色边框
+        legend.title = element_text(face = "bold"),  
+        # 加粗图例标题
+        legend.text = element_text(size = 10),       
+        # 调整图例文本大小
+        legend.margin = margin(t = 0, b = 0, l = 0, r = 10),  # 调整图例边距
+        plot.margin = margin(10, 10, 50, 10, unit = "pt")) +  # 增大图形边距，特别是底部边距
+  guides(color = guide_legend(nrow = 2, byrow = TRUE))  # 指定图例为2*3排列
+
+
+
+```
+
+4、相关性热力图
+
+```{r}
+# 假设 'data' 是您的数据框
+
+# 提取所需的变量
+variables <- c("price", "star_rating", "Score", "Cleanliness", "Facilities", "Location", "Room.comfort.and.quality", "Service", "Value.for.money")
+
+# 从数据框中选择所需的列
+data_subset <- data[variables]
+
+# 将0替换为NA，以便在计算相关性时将其视为缺失值
+data_subset[data_subset == 0] <- NA
+
+# 计算相关性矩阵，考虑缺失值
+cor_matrix <- cor(data_subset, use = "pairwise.complete.obs")
+
+# 将相关性矩阵转换为长格式
+cor_long <- reshape2::melt(cor_matrix)
+
+# 绘制热力图
+ggplot(cor_long, aes(Var1, Var2, fill = value, label = round(value, 2))) +
+  geom_tile(color = "white") +
+  geom_text(size = 3, color = "black", show.legend = FALSE) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  labs(title = "Correlation Heatmap",
+       x = "Variables",
+       y = "Variables") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "right",
+        plot.title = element_text(hjust = 0.5))
+
+
+```
+
+价格price与Location最相关
+
+用户给酒店的星级评分与设施Facilities最相关
+
+5、词云
+
+```{r,eval=FALSE}
+library(wordcloud2)
+library(jiebaR)
+
+cleanliness <- data$Cleanliness.and.safety
+service <- data$Services.and.conveniences
+access <- data$Access
+available <- data$Available.in.all.rooms
+around <- data$Getting.around
+
+cleanliness_text <- unlist(strsplit(cleanliness, "@@", fixed = TRUE))
+service_text <- unlist(strsplit(service, "@@", fixed = TRUE))
+access_text <- unlist(strsplit(access, "@@", fixed = TRUE))
+available_text <- unlist(strsplit(available, "@@", fixed = TRUE))
+around_text <- unlist(strsplit(around, "@@", fixed = TRUE))
+
+# 去除包含NA的元素
+cleanliness_text <- na.omit(cleanliness_text)
+service_text <- na.omit(service_text)
+access_text <- na.omit(access_text)
+available_text <- na.omit(available_text)
+around_text <- na.omit(around_text)
+
+# 计算词频
+wordfreq <- data.frame(table(c(cleanliness_text, service_text, access_text, available_text, around_text)))
+
+# 绘制词云
+wordfreq <- wordfreq[order(-wordfreq$Freq), ]
+
+# Set the wordcloud2 options to place high-frequency words in the center
+wordcloud2(wordfreq, size = 0.1, gridSize = 0, rotateRatio = 0, minRotation = -30, maxRotation = 30)
+
+```

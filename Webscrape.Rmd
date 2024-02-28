@@ -1,0 +1,349 @@
+---
+title: "Webscrape"
+author:
+  - 姚圣泰
+documentclass: ctexart
+keywords:
+  - 中文
+  - R Markdown
+geometry: "left=2cm,right=2cm,top=2cm,bottom=2cm"
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: no
+    toc: no
+date: "2023-12-23"
+---
+
+### 一、抓取所有酒店链接
+
+![](images/WechatIMG130.jpg){width="500"}
+
+```{r,eval=FALSE}
+# 加载所需的R包
+library(RSelenium)
+library(rvest)
+library(httr)
+library(xfun)
+library(data.table)
+source('from.R')  # 从外部文件加载额外的函数或代码
+
+# 初始化Selenium WebDriver，并打开Chrome浏览器
+do <- remoteDriver(browserName = 'chrome')
+do$open()
+do$navigate(fromURL)
+Sys.sleep(5)  # 休眠5秒，等待页面加载完成
+
+iii <- 1  # 初始化循环计数器
+
+while(1) {  # 无限循环，直到手动中断
+
+    # 定义输出HTML文件路径
+    outhtml.file <- file.path('searchPages', paste0('SearhP', iii, '.html'))
+
+    # 模拟滑动垂直scroller
+    vpos <- ceiling(seq(10, 2500, length.out = 20)) * 10
+
+    for (ind in 1:20) {
+        cat(ind, "===\n")
+        cat(vpos[ind], "+\n")
+        do$executeScript(paste0("window.scrollTo(0,", vpos[ind] + sample(10:200, 1), ");"))
+        Sys.sleep(sample(2:5, 1) / 4)
+    }
+    do$executeScript("window.scrollTo(0,document.body.scrollHeight);")
+
+    # 获取页面源代码并保存到本地文件
+    do$getPageSource() -> kk
+    cat(kk[[1]], sep = "\n", file = outhtml.file)
+
+    # 使用rvest解析页面源代码，提取酒店信息
+    read_html(kk[[1]]) -> aa
+    html_nodes(aa, 'li[data-hotelid] > div >a') -> hs
+    hs |> html_attrs() -> hs2
+    unique(unlist(lapply(hs2, names), use.names = FALSE)) -> inter.names
+    t(sapply(hs2, function(x) x[inter.names])) -> hs3
+    as.data.table(hs3) -> hs
+
+    print(hs)
+
+    # 保存提取的酒店信息到RData文件
+    save(hs, file = gsub('html', 'RData', outhtml.file))
+
+    # 翻页操作，点击下一页按钮
+    hh <- try(do$findElement('css selector', 'button#paginationNext'))
+    if (inherits(hh, 'try-error')) break
+    hh$clickElement()
+    Sys.sleep(sample(5:13, 1))
+
+    iii <- iii + 1  # 更新循环计数器
+}
+
+# 整理所有抓取到的酒店信息并保存到RData文件
+list.files('searchPages', pattern = 'SearhP\\d+\\.RData', full = TRUE) -> ds
+lapply(ds, function(x) {load(x); hs}) -> ds
+rbindlist(ds) -> ds
+unique(ds) -> ds
+ds
+save(ds, file = 'searchResults.RData')
+
+```
+
+这段代码的主要流程包括：
+
+1.  初始化Selenium WebDriver，打开Chrome浏览器，并访问指定的网页。
+
+2.  在一个无限循环中，模拟滑动垂直scroller，抓取每一页的酒店信息，并保存到本地文件。
+
+3.  使用rvest包解析HTML页面源代码，提取酒店信息。
+
+4.  将提取的酒店信息保存为RData文件。
+
+5.  翻页操作，点击下一页按钮，继续抓取下一页的数据。
+
+6.  整理所有抓取到的酒店信息，去除重复项，并保存到最终的RData文件。
+
+### 二、下载每个酒店页面
+
+![](images/WechatIMG131.jpg){width="500"}
+
+```{r,eval=FALSE}
+# 加载所需的R包
+library(RSelenium)
+library(rvest)
+library(httr)
+library(xfun)
+library(data.table)
+source('from.R')  # 从外部文件加载额外的函数或代码
+
+# 加载之前保存的搜索结果数据
+load('searchResults.RData')
+ds[, `data-event-key` := gsub('\\|', '_', `data-event-key`)]  # 替换data-event-key中的|为_
+ds[, url := paste0('https://www.agoda.com', href)]  # 构建完整的酒店URL
+
+# 输出所有数据中的酒店数量，检查是否有重复项
+ds[, .N, .(`property-id`, `aria-label`)]
+
+# 去除重复项，保留每个酒店的第一条记录
+ds[, .SD[1], .(`property-id`, `aria-label`)] -> ds.small
+
+# 选择一个酒店的URL初始化
+inter.url <- ds.small$url[1]
+
+# 初始化Selenium WebDriver，并打开Chrome浏览器，访问示例酒店的URL
+do <- remoteDriver(browserName = 'chrome')
+do$open()
+do$navigate(inter.url)
+
+# 定义函数，用于获取酒店详细信息
+getHOTELInfo <- function(inter.url, UID = 'aaaaa') {
+  file.path('hotelPages', paste0(UID, '.html')) -> destfile
+  
+  # 如果文件已存在，表示已经获取过该酒店的信息，直接返回'HAD'
+  if (file.exists(destfile)) return('HAD')
+
+  # 访问酒店详情页
+  do$navigate(inter.url)
+  
+  # 模拟滑动垂直scroller
+  vpos <- ceiling(seq(10, 1000, length.out = 10)) * 10
+  
+  for (ind in 1:10) {
+    cat(ind, "===\n")
+    cat(vpos[ind], "+\n")
+    do$executeScript(paste0("window.scrollTo(0,", vpos[ind] + sample(10:200, 1), ");"))
+    Sys.sleep(sample(2:5, 1) / 2)
+  }
+  do$executeScript("window.scrollTo(0,document.body.scrollHeight);")
+       
+  # 获取页面源代码并保存到本地文件
+  do$getPageSource() -> kk
+  cat(kk[[1]], sep = "\n", file = destfile)
+}
+
+# 对数据集中的酒店应用获取详细信息的函数
+apply(ds.small[, .(url, `data-event-key`)], 1, function(x) {
+  cat(x[1], '===\n')
+  try(getHOTELInfo(x[1], x[2]))
+}) -> resu
+
+```
+
+这段代码主要实现了以下步骤：
+
+1.  对之前保存的搜索结果进行处理，构建完整的酒店URL，去除重复项。
+
+2.  初始化Selenium WebDriver，并打开Chrome浏览器，访问示例酒店的URL。
+
+3.  定义一个函数**`getHOTELInfo`**，用于获取酒店的详细信息，包括滑动页面、获取页面源代码并保存到本地文件。
+
+4.  对数据集中的每个酒店应用**`getHOTELInfo`**函数，获取详细信息并保存到本地文件。
+
+### 三、定义每个酒店爬取的具体内容
+
+```{r,eval=FALSE}
+# 定义函数parseHotelInfo，输入为酒店的HTML页面文件路径hotelHTMLFile
+parseHotelInfo <- function(hotelHTMLFile) {
+    # 读取HTML文件
+    read_html(hotelHTMLFile) -> aa
+    
+    # 提取酒店名称
+    html_elements(aa, 'p.HeaderCerebrum__Name') |> html_text() -> w1.name
+    
+    # 提取酒店星级
+    html_elements(aa, 'span[class ~="HeaderCerebrum__Rating"]') |> html_attr('aria-label') -> w2.star
+    
+    # 提取酒店特色信息
+    html_elements(aa, 'div.FeatureGroup')[1] -> fea
+    html_elements(fea, 'h5') |> html_text2() -> te
+    html_elements(fea, 'h5 ~ul ') -> tes
+    lapply(tes, function(x) html_elements(x, 'li') |> html_text()) -> tes
+    names(tes) <- te
+    tes -> w3
+    
+    # 提取酒店位置信息
+    html_elements(aa, 'div[data-element-name="about-hotel-location"]')[1] -> loc
+    html_elements(loc, 'h5') |> html_text2() -> te
+    html_elements(loc, 'h5 ~ul ') -> tes
+    lapply(tes, function(x) {
+        html_elements(x, 'li') -> inter.li
+        lapply(inter.li, function(y) html_elements(y, 'span') |> html_text()) -> inter.li
+        sapply(inter.li, paste, collapse = " ## ")
+    }) -> tes
+    names(tes) <- te
+    tes -> wloc
+    
+    # 提取酒店评价信息
+    html_elements(aa, 'div.Review-travelerGrade-Cell div') -> ss
+    sapply(ss, function(x) html_elements(x, 'span') |> html_text()) -> ss
+    ss[sapply(ss, length) > 0] -> w4
+    sapply(w4, `[`, 1) -> w4.name
+    sapply(w4, `[`, 2) -> w4
+    names(w4) <- w4.name
+    
+    # 提取酒店评分信息
+    html_elements(aa, 'div.ReviewScore-Number') |> html_text2() -> s1
+    html_elements(aa, 'div.ReviewScoreText') |> html_text2() -> s10
+    w4 <- c('eval' = s10, 'Score' = s1, w4)
+    
+    # 提取酒店最低房价
+    html_element(aa, 'div.StickyNavPrice') |> html_attr('data-element-cheapest-room-price') -> w0.price
+    
+    # 构建基本信息的data.table
+    data.table(
+        name = w1.name,
+        star = w2.star,
+        price = w0.price
+    ) -> bas
+    
+    # 合并基本信息和特色信息的data.table
+    cbind(bas, as.data.table(t(w4))) -> bas
+    
+    # 将特色信息的列表转换为data.table的列
+    sapply(w3, paste, collapse = " @@ ") -> w30
+    cbind(bas, as.data.table(t(w30))) -> bas
+    
+    # 将位置信息的列表转换为data.table的列
+    sapply(wloc, paste, collapse = " @@ ") -> wloc0
+    cbind(bas, as.data.table(t(wloc0))) -> bas
+    
+    # 构建最终结果的data.table，包括文件路径作为`data-event-key`
+    data.table(`data-event-key` = hotelHTMLFile, bas)
+}
+
+```
+
+该函数的主要作用是提取酒店信息并以**`data.table`**的形式返回，其中包括酒店名称、星级、特色信息、位置信息、评价信息、评分信息和最低房价等
+
+### 四、爬取酒店具体信息
+
+```{r,eval=FALSE}
+# 加载所需的R包
+library(data.table)
+library(rvest)
+source('from.R')
+
+# 获取所有保存的酒店详情页文件路径
+list.files('hotelPages', full = TRUE) -> fs
+
+# 对每个文件应用parseHotelInfo函数，尝试解析酒店信息
+lapply(fs, function(x) {
+  cat(match(x, fs), "==\n")
+  try(parseHotelInfo(x))
+}) -> resu
+
+# 将解析的结果合并为一个数据表
+rbindlist(lapply(resu, function(x) {
+  names(x) -> inter.name
+  match(unique(inter.name), inter.name) -> inter.cols
+  x[, ..inter.cols]
+}), fill = TRUE) -> anno
+
+# 去除缺失值和无效值
+anno[!is.na(name)] -> anno
+anno[, Score := sapply(Score, function(x) ifelse(is.null(x), NA, x))]
+anno[, eval := sapply(eval, function(x) ifelse(is.null(x), NA, x))]
+
+# 处理`data-event-key`列，去除文件扩展名
+anno[, `data-event-key` := gsub('.html', '', basename(`data-event-key`))]
+
+# 加载之前保存的搜索结果数据
+load('searchResults.RData')
+ds[, `data-event-key` := gsub('\\|', '_', `data-event-key`)]  # 替换data-event-key中的|为_
+ds[, url := paste0('https://www.agoda.com', href)]  # 构建完整的酒店URL
+
+# 输出所有数据中的酒店数量，检查是否有重复项
+ds[, .N, .(`property-id`, `aria-label`)]
+
+# 去除重复项，保留每个酒店的第一条记录
+ds[, .SD[1], .(`property-id`, `aria-label`)] -> ds.small
+
+# 将两个数据表合并，使用`data-event-key`列进行匹配
+ds.small[anno, on = .(`data-event-key`)] -> ok
+
+# 保存最终结果为RData文件
+save(anno, file = 'anno.RData')
+
+# 使用readr包中的write_excel_csv函数将结果保存为CSV文件
+library(readr)
+write_excel_csv(ok, file = 'HOTELS.csv')
+
+```
+
+这段代码主要完成以下任务：
+
+1.  对每个酒店详情页文件应用**`parseHotelInfo`**函数，尝试解析酒店信息，将结果保存为一个列表。
+
+2.  将列表中的解析结果合并为一个数据表**`anno`**。
+
+3.  对**`anno`**进行一些清理，去除缺失值和无效值。
+
+4.  处理**`data-event-key`**列，去除文件扩展名。
+
+5.  加载之前保存的搜索结果数据，构建完整的酒店URL。
+
+6.  输出所有数据中的酒店数量，检查是否有重复项。
+
+7.  去除重复项，保留每个酒店的第一条记录，得到**`ds.small`**。
+
+8.  将**`ds.small`**与**`anno`**合并，使用**`data-event-key`**列进行匹配，得到最终结果。
+
+9.  保存最终结果为RData文件(**`anno.RData`**)和CSV文件(**`HOTELS.csv`**)。
+
+### 五、爬取结果
+
+HOTEL.csv文件
+
+![](images/1703337375197.jpg)
+
+具体爬取内容，以第一个酒店为例
+
+```{r,eval=TRUE,message=TRUE}
+# 输出每一列名称和对应的第一行值
+#cat("Column Names\tFirst Row Values\n")
+for (col_name in names(data)) {
+  cat(paste(data[1, col_name], "\n"))
+  #cat(paste(col_name, "\n"))
+}
+
+
+```
